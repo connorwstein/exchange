@@ -1,5 +1,5 @@
 [package]
-name = "microservice_rust"
+name = "exchange"
 version = "0.1.0"
 authors = ["Connor Stein <cstein@paxos.com>"]
 edition = "2018"
