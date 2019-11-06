@@ -17,8 +17,10 @@ use hyper::{Body, Client, Method, Request, Response};
 use hyper::client::HttpConnector;
 use hyper::StatusCode;
 use serde::{Deserialize, Serialize};
-use serde_json::Result;
+use serde_json::{Result, Error};
+use std::ptr::null;
 
+use std::error::Error;
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 enum Side {
@@ -39,56 +41,143 @@ enum OrderType {
     // TODO: limit, fok, etc.
 }
 
-#[derive(Serialize, Deserialize, Debug, Copy, Clone)] // Deriving traits we need
-pub struct Order {
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+pub struct OpenMarketOrder {
+    id: u32,
     amount: u32,
     symbol: Symbol,
     side: Side,
-    order_type: OrderType,
+}
+
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+pub struct FilledMarketOrder {
+    open_order: OpenMarketOrder,
+    executed_price: u32,
 }
 
 
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
 type ResponseFuture = Box<dyn Future<Item = Response<Body>, Error = GenericError> + Send>;
-type OrderBook = Arc<RwLock<Vec<Order>>>;
+type OrderBook = Arc<RwLock<Vec<OpenMarketOrder>>>;
 
 // Back this "exchange" with an in-memory store
 lazy_static! {
     pub static ref ORDER_BOOK: OrderBook = Arc::new(RwLock::new(Vec::new()));
+    pub static ref FILLED_ORDERS: FilledOrders = Arc::new(RwLock::new(Vec::new()));
 }
 
-pub fn add_order(t: Order) {
+pub fn add_order(t: OpenMarketOrder) {
     info!("adding Order {:?}", t);
     let ob = Arc::clone(&ORDER_BOOK);
     let mut lock = ob.write().unwrap(); // take the write lock
     lock.push(t);
 }
 
-pub fn get_order_book() -> Vec<Order> {
+pub fn get_order_book() -> Vec<OpenMarketOrder> {
     let ob = Arc::clone(&ORDER_BOOK);
     let lock = ob.read().unwrap(); // take a read lock
     (*lock).clone()
 }
 
+pub fn remove_order(t: OpenMarketOrder) {
+    let ob = Arc::clone(&ORDER_BOOK);
+    let mut lock = ob.write().unwrap(); // take a read lock
+    let mut index: Option<usize> = None;
+    for (i, x) in lock.iter().enumerate() {
+        println!("{:?}", x);
+        if x.id == t.id {
+            index = Some(i as usize);
+            println!("found match");
+            break;
+        }
+    }
+    match index {
+        Some(index) => {
+            println!("removing item at {}, len {}", index, lock.len());
+            lock.remove(index);
+        },
+        None => {
+            println!("no such order");
+        }
+    }
+}
 
-// Walk through all the available OrderBook and see if we
-//pub fn fill_market_order(t: Order) -> Result<> {
+// Walk through all the available OrderBook and see if we can fill this
+//pub fn fill_market_order(t: OpenMarketOrder) -> Result<FilledMarketOrder> {
+//    let ob = Arc::clone(&ORDER_BOOK);
+//    let mut lock = ob.write().unwrap(); // take a write lock so we can remove it if it fills
 //
+//    let mut price: Option<u32> = None;
+//    for (i, open_order) in lock.iter().enumerate() {
+//        match open_order.side {
+//            Side::Buy => {
+//                if t.side == Side::Sell {
+//
+//                }
+//            }
+//            Side::Sell => {
+//                if t.side == Side::Buy {
+//
+//                }
+//            }
+//        }
+//    }
+//    match price {
+//        Some(price) => {
+//            Ok(FilledMarketOrder{
+//                executed_price: price,
+//                open_order: t,
+//            })
+//        },
+//        None => {
+//            error!("cant fill order");
+//        }
+//    }
 //}
+
+
+pub fn save_filled_market_order(t: FilledMarketOrder) {
+    let ob = Arc::clone(&FILLED_ORDERS);
+    let mut lock = ob.write().unwrap();
+    lock.push(t);
+}
 
 #[cfg(test)]
 mod tests {
-    use crate::{Order, add_order, get_order_book};
+    use crate::{OpenMarketOrder, add_order, get_order_book, remove_order};
     use crate::Side::Buy;
     use crate::Symbol::AAPL;
     use crate::OrderType::MKT;
 
     #[test]
-    fn test_Order() {
-        add_order(Order{amount: 10, symbol: AAPL, side: Buy, order_type: MKT});
+    fn test_order() {
+        let order = OpenMarketOrder{
+            id: 1,
+            amount: 10,
+            symbol: AAPL,
+            side: Buy,
+        };
+        add_order(order);
         let ob = get_order_book();
         assert_eq!(1, ob.len());
+        remove_order(order);
+        let ob = get_order_book();
+        assert_eq!(0, ob.len());
     }
+
+//    #[test]
+//    fn test_match_order() {
+//        let order = OpenMarketOrder{
+//            id: 1,
+//            amount: 10,
+//            symbol: AAPL,
+//            side: Buy,
+//        };
+//        add_order();
+//        let ob = get_order_book();
+//        assert_eq!(1, ob.len());
+//        empty_order_book();
+//    }
 }
 
 pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFuture {
@@ -100,7 +189,8 @@ pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFu
                     .from_err()
                     .and_then(|whole_body| {
                         let str_body = String::from_utf8(whole_body.to_vec()).unwrap();
-                        let res: Result<Order> = serde_json::from_str(&str_body);
+                        let res: Result<OpenMarketOrder
+                        > = serde_json::from_str(&str_body);
                         match res {
                             Ok(v) => {
                                 add_order(v);
