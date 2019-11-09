@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Result, Error};
 use std::ptr::null;
 
-use std::error::Error;
+use std::error;
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 enum Side {
@@ -37,137 +37,131 @@ enum Symbol {
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 enum OrderType {
-    MKT,
+    LIMIT,
     // TODO: limit, fok, etc.
 }
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
-pub struct OpenMarketOrder {
+pub struct OpenLimitOrder {
     id: u32,
     amount: u32,
     symbol: Symbol,
+    price: u32,
     side: Side,
 }
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
-pub struct FilledMarketOrder {
-    open_order: OpenMarketOrder,
+pub struct FilledLimitOrder {
+    open_order: OpenLimitOrder,
     executed_price: u32,
 }
 
 
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
 type ResponseFuture = Box<dyn Future<Item = Response<Body>, Error = GenericError> + Send>;
-type OrderBook = Arc<RwLock<Vec<OpenMarketOrder>>>;
+
+use std::collections::{HashMap, VecDeque};
+// Let's have separate order books per symbol as they are entirely independent and can
+// be handled concurrently.
+// A map can look up the respective order book for a given symbol.
+// The order book needs to be organized by price level first and then by arrival time.
+// Let's use a map[price level]fifo queue of orders
+type OrderBookEntries = HashMap<u32, VecDeque<OpenLimitOrder>>;
+type OrderBook = Arc<RwLock<OrderBookEntries>>;
 
 // Back this "exchange" with an in-memory store
+// We may want to look at redis?
 lazy_static! {
-    pub static ref ORDER_BOOK: OrderBook = Arc::new(RwLock::new(Vec::new()));
-    pub static ref FILLED_ORDERS: FilledOrders = Arc::new(RwLock::new(Vec::new()));
+    pub static ref ORDER_BOOK: OrderBook = Arc::new(RwLock::new(HashMap::new()));
 }
 
-pub fn add_order(t: OpenMarketOrder) {
+pub fn add_order(t: OpenLimitOrder) {
     info!("adding Order {:?}", t);
     let ob = Arc::clone(&ORDER_BOOK);
     let mut lock = ob.write().unwrap(); // take the write lock
-    lock.push(t);
+    // If we find an entry at that price point, add it to the queue
+    // Otherwise create a queue at that price point.
+    let price_point = lock.get_mut(&t.price);
+    match price_point {
+        Some(price_point) => {
+            price_point.push_back(t);
+        },
+        None => {
+            let mut orders: VecDeque<OpenLimitOrder> = VecDeque::new();
+            orders.push_back(t);
+            lock.insert(t.price, orders);
+        }
+    };
 }
 
-pub fn get_order_book() -> Vec<OpenMarketOrder> {
+pub fn get_order_book() -> OrderBookEntries {
     let ob = Arc::clone(&ORDER_BOOK);
     let lock = ob.read().unwrap(); // take a read lock
     (*lock).clone()
 }
 
-pub fn remove_order(t: OpenMarketOrder) {
-    let ob = Arc::clone(&ORDER_BOOK);
-    let mut lock = ob.write().unwrap(); // take a read lock
-    let mut index: Option<usize> = None;
-    for (i, x) in lock.iter().enumerate() {
-        println!("{:?}", x);
+pub fn index_of_order_in_queue(t: OpenLimitOrder, orders: &mut VecDeque<OpenLimitOrder>) -> Option<usize> {
+    for (i, x) in orders.iter().enumerate() {
         if x.id == t.id {
-            index = Some(i as usize);
             println!("found match");
-            break;
+            return Some(i as usize);
         }
     }
-    match index {
-        Some(index) => {
-            println!("removing item at {}, len {}", index, lock.len());
-            lock.remove(index);
+    return None
+}
+
+pub fn remove_order(t: OpenLimitOrder) {
+    let ob = Arc::clone(&ORDER_BOOK);
+    let mut lock = ob.write().unwrap(); // take a write lock
+    let order_queue = lock.get_mut(&t.price);
+    match order_queue {
+        Some(order_queue) => {
+            let index = index_of_order_in_queue(t, order_queue);
+            match index {
+                Some(index) => {
+                    println!("removing item at {}, len {}", index, order_queue.len());
+                    order_queue.remove(index);
+                },
+                None => {
+                    println!("no such order");
+                }
+            };
         },
         None => {
             println!("no such order");
         }
-    }
-}
-
-// Walk through all the available OrderBook and see if we can fill this
-//pub fn fill_market_order(t: OpenMarketOrder) -> Result<FilledMarketOrder> {
-//    let ob = Arc::clone(&ORDER_BOOK);
-//    let mut lock = ob.write().unwrap(); // take a write lock so we can remove it if it fills
-//
-//    let mut price: Option<u32> = None;
-//    for (i, open_order) in lock.iter().enumerate() {
-//        match open_order.side {
-//            Side::Buy => {
-//                if t.side == Side::Sell {
-//
-//                }
-//            }
-//            Side::Sell => {
-//                if t.side == Side::Buy {
-//
-//                }
-//            }
-//        }
-//    }
-//    match price {
-//        Some(price) => {
-//            Ok(FilledMarketOrder{
-//                executed_price: price,
-//                open_order: t,
-//            })
-//        },
-//        None => {
-//            error!("cant fill order");
-//        }
-//    }
-//}
-
-
-pub fn save_filled_market_order(t: FilledMarketOrder) {
-    let ob = Arc::clone(&FILLED_ORDERS);
-    let mut lock = ob.write().unwrap();
-    lock.push(t);
+    };
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{OpenMarketOrder, add_order, get_order_book, remove_order};
+    use crate::{OpenLimitOrder, add_order, get_order_book, remove_order};
     use crate::Side::Buy;
     use crate::Symbol::AAPL;
-    use crate::OrderType::MKT;
+    use crate::OrderType::LIMIT;
 
     #[test]
     fn test_order() {
-        let order = OpenMarketOrder{
+        let order = OpenLimitOrder{
             id: 1,
             amount: 10,
             symbol: AAPL,
             side: Buy,
+            price: 1,
         };
         add_order(order);
         let ob = get_order_book();
-        assert_eq!(1, ob.len());
+        let hm = ob.get(&order.price).unwrap();
+        assert_eq!(hm[0].amount, order.amount);
         remove_order(order);
         let ob = get_order_book();
-        assert_eq!(0, ob.len());
+        let hm = ob.get(&order.price).unwrap();
+        assert_eq!(hm.len(), 0);
     }
 
 //    #[test]
 //    fn test_match_order() {
-//        let order = OpenMarketOrder{
+//        let order = OpenLimitOrder{
 //            id: 1,
 //            amount: 10,
 //            symbol: AAPL,
@@ -189,7 +183,7 @@ pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFu
                     .from_err()
                     .and_then(|whole_body| {
                         let str_body = String::from_utf8(whole_body.to_vec()).unwrap();
-                        let res: Result<OpenMarketOrder
+                        let res: Result<OpenLimitOrder
                         > = serde_json::from_str(&str_body);
                         match res {
                             Ok(v) => {
