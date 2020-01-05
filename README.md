@@ -9,3 +9,6 @@ be handled concurrently.
 - A map can look up the respective order book for a given symbol.
 - The order book needs to be organized by price level first and then by arrival time. This suggests a sorted vector of queues per price as the
 fundamental data structure.
+
+To test:
+RUST_BACKTRACE=1 cargo test -- --nocapture --test-threads=1
