@@ -28,8 +28,8 @@ use serde_json::{Error, Result};
 
 mod order_book;
 
-static mut buy_ob: Option<order_book::OrderBookV2> = None;
-static mut sell_ob: Option<order_book::OrderBookV2> = None;
+static mut buy_ob: Option<order_book::OrderBook> = None;
+static mut sell_ob: Option<order_book::OrderBook> = None;
 
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
 type ResponseFuture = Box<dyn Future<Item = Response<Body>, Error = GenericError> + Send>;
@@ -96,8 +96,8 @@ fn main() {
 
     let client = Client::new();
     unsafe {
-        buy_ob = Some(order_book::OrderBookV2::new(order_book::Side::Buy));
-        sell_ob = Some(order_book::OrderBookV2::new(order_book::Side::Sell));
+        buy_ob = Some(order_book::OrderBook::new(order_book::Side::Buy));
+        sell_ob = Some(order_book::OrderBook::new(order_book::Side::Sell));
     }
 
     let new_service = move || {

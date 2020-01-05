@@ -34,14 +34,14 @@ pub struct FilledLimitOrder {
 
 type OrderBook = Arc<RwLock<Vec<VecDeque<OpenLimitOrder>>>>;
 
-pub struct OrderBookV2 {
+pub struct OrderBook {
     book: Box<Vec<VecDeque<OpenLimitOrder>>>,
     side: Side,
 }
 
-impl OrderBookV2 {
-    pub fn new(side: Side) -> OrderBookV2 {
-        OrderBookV2{
+impl OrderBook {
+    pub fn new(side: Side) -> OrderBook {
+        OrderBook{
             book: Box::new(Vec::new()),
             side: side,
         }
@@ -217,7 +217,7 @@ impl OrderBookV2 {
 #[cfg(test)]
 mod tests {
     use crate::VecDeque;
-    use crate::order_book::{Symbol, OpenLimitOrder, Side, OrderBookV2};
+    use crate::order_book::{Symbol, OpenLimitOrder, Side, OrderBook};
     use uuid::Uuid;
 
     fn assert_order(expected: &OpenLimitOrder, actual: &OpenLimitOrder) {
@@ -262,6 +262,7 @@ mod tests {
             expectedAfterRemove: Vec<VecDeque<OpenLimitOrder>>,
         };
         let test_cases = vec![
+            // Single add remove
             TestCase {
                 add: vec![OpenLimitOrder {
                     id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
@@ -285,9 +286,52 @@ mod tests {
                     price: 5,
                 }],
                 expectedAfterRemove: Vec::new()
+            },
+            // Same price should queue
+            TestCase{
+                add: vec![OpenLimitOrder {
+                    id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
+                    amount: 10,
+                    symbol: Symbol::AAPL,
+                    side: Side::Buy,
+                    price: 5,
+                }, OpenLimitOrder {
+                    id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap(),
+                    amount: 10,
+                    symbol: Symbol::AAPL,
+                    side: Side::Buy,
+                    price: 5,
+                }],
+                expectedAfterAdd: vec![VecDeque::from(vec![OpenLimitOrder {
+                    id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
+                    amount: 10,
+                    symbol: Symbol::AAPL,
+                    side: Side::Buy,
+                    price: 5,
+                }, OpenLimitOrder {
+                    id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap(),
+                    amount: 10,
+                    symbol: Symbol::AAPL,
+                    side: Side::Buy,
+                    price: 5,
+                }])],
+                remove: vec![OpenLimitOrder {
+                    id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
+                    amount: 10,
+                    symbol: Symbol::AAPL,
+                    side: Side::Buy,
+                    price: 5,
+                }],
+                expectedAfterRemove: vec![VecDeque::from(vec![OpenLimitOrder {
+                    id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap(),
+                    amount: 10,
+                    symbol: Symbol::AAPL,
+                    side: Side::Buy,
+                    price: 5,
+                }])]
             }
         ];
-        let mut buy_ob = OrderBookV2::new(Side::Buy);
+        let mut buy_ob = OrderBook::new(Side::Buy);
         for tc in test_cases.iter() {
             for &to_add in tc.add.iter() {
                 buy_ob.add_order(to_add);
@@ -299,4 +343,9 @@ mod tests {
             assert_order_book(buy_ob.get_book(), tc.expectedAfterRemove.clone());
         }
     }
+
+    #[test]
+    fn test_order_fill() {
+    }
+
 }

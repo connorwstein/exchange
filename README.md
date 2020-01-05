@@ -11,4 +11,4 @@ be handled concurrently.
 fundamental data structure.
 
 To test:
-RUST_BACKTRACE=1 cargo test -- --nocapture --test-threads=1
+RUST_BACKTRACE=1 cargo test -- --nocapture
