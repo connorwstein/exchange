@@ -16,7 +16,7 @@ use std::error;
 use std::ptr::null;
 use std::str;
 use std::string::String;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, RwLockWriteGuard};
 use std::vec::Vec;
 
 use futures::{future, Stream};
@@ -46,47 +46,39 @@ pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFu
             Box::new(req.into_body().concat2().from_err().and_then(|whole_body| {
                 let str_body = String::from_utf8(whole_body.to_vec()).unwrap();
                 info!("got order {:?}", str_body);
-                let res: Result<order_book::OpenLimitOrder> = serde_json::from_str(&str_body);
-                match res {
-                    Ok(v) => {
-                        if v.side == order_book::Side::Buy {
-                            let result = buy_ob.write().unwrap().add_order(v);
-                            if result.is_err() {
-                                return Box::new(future::ok(
-                                    Response::builder()
-                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                        .body(Body::empty())
-                                        .unwrap(),
-                                ));
-                            }
-                        } else {
-                            let result = sell_ob.write().unwrap().add_order(v);
-                            if result.is_err() {
-                                return Box::new(future::ok(
-                                    Response::builder()
-                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                        .body(Body::empty())
-                                        .unwrap(),
-                                ));
-                            }
-                        }
-                        Box::new(future::ok(
-                            Response::builder()
-                                .status(StatusCode::OK)
-                                .body(Body::empty())
-                                .unwrap(),
-                        ))
-                    }
-                    Err(e) => {
-                        warn!("bad request {}", e);
-                        Box::new(future::ok(
-                            Response::builder()
-                                .status(StatusCode::BAD_REQUEST)
-                                .body(Body::empty())
-                                .unwrap(),
-                        ))
-                    }
+                let order_req_result: Result<order_book::OpenLimitOrder> =
+                    serde_json::from_str(&str_body);
+                if order_req_result.is_err() {
+                    warn!("bad request {:?}", order_req_result.err());
+                    return Box::new(future::ok(
+                        Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .body(Body::empty())
+                            .unwrap(),
+                    ));
                 }
+                let mut book: Option<RwLockWriteGuard<order_book::OrderBook>> = None;
+                let order_req = order_req_result.unwrap();
+                if order_req.side == order_book::Side::Buy {
+                    book = Some(buy_ob.write().unwrap());
+                } else {
+                    book = Some(sell_ob.write().unwrap());
+                }
+                let order = book.unwrap().add_order(order_req);
+                if order.is_err() {
+                    return Box::new(future::ok(
+                        Response::builder()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .body(Body::empty())
+                            .unwrap(),
+                    ));
+                }
+                Box::new(future::ok(
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .body(Body::from(serde_json::to_string(&order.unwrap()).unwrap()))
+                        .unwrap(),
+                ))
             }))
         }
         (&Method::GET, "/sells") => {
@@ -100,6 +92,15 @@ pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFu
             ))
         }
         (&Method::GET, "/buys") => {
+            let payload = serde_json::to_string(&buy_ob.read().unwrap().get_book()).unwrap();
+            Box::new(future::ok(
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Body::from(payload))
+                    .unwrap(),
+            ))
+        }
+        (&Method::GET, "/fill") => {
             let payload = serde_json::to_string(&buy_ob.read().unwrap().get_book()).unwrap();
             Box::new(future::ok(
                 Response::builder()
