@@ -45,40 +45,46 @@ pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFu
         (&Method::POST, "/order") => {
             Box::new(req.into_body().concat2().from_err().and_then(|whole_body| {
                 let str_body = String::from_utf8(whole_body.to_vec()).unwrap();
-                info!("got order {:?}", str_body);
-                let order_req_result: Result<order_book::OpenLimitOrder> =
+                info!("order requested {:?}", str_body);
+                let order_request: Result<order_book::OpenLimitOrder> =
                     serde_json::from_str(&str_body);
-                if order_req_result.is_err() {
-                    warn!("bad request {:?}", order_req_result.err());
-                    return Box::new(future::ok(
-                        Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .body(Body::empty())
-                            .unwrap(),
-                    ));
+                match order_request {
+                    Ok(order_request) => {
+                        let mut book: RwLockWriteGuard<order_book::OrderBook> =
+                            if order_request.side == order_book::Side::Buy {
+                                buy_ob.write().unwrap()
+                            } else {
+                                sell_ob.write().unwrap()
+                            };
+                        let order = book.add_order(order_request);
+                        match order {
+                            Ok(order) => {
+                                Box::new(future::ok(
+                                    Response::builder()
+                                        .status(StatusCode::OK)
+                                        .body(Body::from(serde_json::to_string(&order).unwrap()))
+                                        .unwrap(),
+                                ))
+                            },
+                            Err(order) => {
+                                Box::new(future::ok(
+                                    Response::builder()
+                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                        .body(Body::from(serde_json::to_string(&order).unwrap()))
+                                        .unwrap(),
+                                ))
+                            }
+                        }
+                    },
+                    Err(order_request) => {
+                        Box::new(future::ok(
+                            Response::builder()
+                                .status(StatusCode::BAD_REQUEST)
+                                .body(Body::empty())
+                                .unwrap(),
+                        ))
+                    },
                 }
-                let mut book: Option<RwLockWriteGuard<order_book::OrderBook>> = None;
-                let order_req = order_req_result.unwrap();
-                if order_req.side == order_book::Side::Buy {
-                    book = Some(buy_ob.write().unwrap());
-                } else {
-                    book = Some(sell_ob.write().unwrap());
-                }
-                let order = book.unwrap().add_order(order_req);
-                if order.is_err() {
-                    return Box::new(future::ok(
-                        Response::builder()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .body(Body::empty())
-                            .unwrap(),
-                    ));
-                }
-                Box::new(future::ok(
-                    Response::builder()
-                        .status(StatusCode::OK)
-                        .body(Body::from(serde_json::to_string(&order.unwrap()).unwrap()))
-                        .unwrap(),
-                ))
             }))
         }
         (&Method::GET, "/sells") => {
@@ -100,15 +106,50 @@ pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFu
                     .unwrap(),
             ))
         }
-        (&Method::GET, "/fill") => {
-            let payload = serde_json::to_string(&buy_ob.read().unwrap().get_book()).unwrap();
-            Box::new(future::ok(
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .body(Body::from(payload))
-                    .unwrap(),
-            ))
-        }
+        (&Method::POST, "/fill") => {
+            Box::new(req.into_body().concat2().from_err().and_then(|whole_body| {
+                let str_body = String::from_utf8(whole_body.to_vec()).unwrap();
+                info!("fill order {:?}", str_body);
+                let order_request: Result<order_book::OpenLimitOrder> =
+                    serde_json::from_str(&str_body);
+                match order_request {
+                    Ok(order_request) => {
+                        let mut book: RwLockWriteGuard<order_book::OrderBook> =
+                            if order_request.side == order_book::Side::Buy {
+                                sell_ob.write().unwrap()
+                            } else {
+                                buy_ob.write().unwrap()
+                            };
+                        match book.fill_order(order_request) {
+                            Ok(fr) => {
+                                Box::new(future::ok(
+                                    Response::builder()
+                                        .status(StatusCode::OK)
+                                        .body(Body::from(serde_json::to_string(&fr).unwrap()))
+                                        .unwrap(),
+                                ))
+                            },
+                            Err(fr) => {
+                                info!("unable to fill order");
+                                Box::new(future::ok(
+                                    Response::builder()
+                                        .status(StatusCode::BAD_REQUEST)
+                                        .body(Body::from(serde_json::to_string(&fr).unwrap()))
+                                        .unwrap(),
+                                ))
+                            }
+                        }
+                    },
+                    Err(order_request) => {
+                        Box::new(future::ok(
+                            Response::builder()
+                                .status(StatusCode::BAD_REQUEST)
+                                .body(Body::empty())
+                                .unwrap(),
+                        ))
+                    }
+                }
+        }))}
         _ => Box::new(future::ok(
             Response::builder()
                 .status(StatusCode::METHOD_NOT_ALLOWED)

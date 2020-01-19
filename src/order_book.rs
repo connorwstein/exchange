@@ -1,4 +1,4 @@
-use log::{info, warn};
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use std::boxed::Box;
 use std::collections::VecDeque;
@@ -25,6 +25,11 @@ pub struct OpenLimitOrder {
     pub side: Side,
 }
 
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+pub struct FillResult {
+    pub avg_price: f64,
+}
+
 pub struct OrderBook {
     book: Box<Vec<VecDeque<OpenLimitOrder>>>,
     side: Side,
@@ -47,7 +52,7 @@ impl OrderBook {
         for (i, order_queue) in self.book.iter().enumerate() {
             for (j, order) in order_queue.iter().enumerate() {
                 if order.id == t.id {
-                    println!("found order, id {}", t.id);
+                    debug!("found order, id {}", t.id);
                     return (Some(i as usize), Some(j as usize));
                 }
             }
@@ -65,7 +70,7 @@ impl OrderBook {
             return Err("error removing");
         }
         if self.book[queue_index.unwrap()].len() == 0 {
-            println!("no more orders at price point {}", t.price);
+            debug!("no more orders at price point {}", t.price);
             self.book.remove(queue_index.unwrap());
         }
         return Ok("successfully removed order");
@@ -79,14 +84,14 @@ impl OrderBook {
         if t.id.is_nil() {
             order.id = Uuid::new_v4();
         }
-        println!("adding order {:?}", order);
+        debug!("adding order {:?}", order);
         // If we find an entry at that price point, add it to the queue
         // Otherwise create a queue at that price point.
         let mut queue_index = None;
         let mut insert_index = None;
 
         for (index, order_queue) in self.book.iter().enumerate() {
-            println!("index {:?} order queue {:?}", index, order_queue);
+            debug!("index {:?} order queue {:?}", index, order_queue);
             if order_queue.front().unwrap().price == t.price {
                 queue_index = Some(index);
                 break;
@@ -145,14 +150,14 @@ impl OrderBook {
             return Err("cannot fill sell order with buy  book");
         }
 
-        println!("orderbook size {}", self.book.len());
+        debug!("orderbook size {}", self.book.len());
         if self.book.len() == 0 {
             return Err("empty book");
         }
 
         // If the current price is no good break
         if !self.valid_price(to_fill.price, self.book[0].front().unwrap().price) {
-            println!("nothing available in book at valid price");
+            debug!("nothing available in book at valid price");
             return Err("cannot fill order");
         }
 
@@ -165,22 +170,22 @@ impl OrderBook {
             match order {
                 Some(order) => {
                     orders.push(order);
-                    println!("selecting order {:?}", order);
+                    debug!("selecting order {:?}", order);
                     remaining = remaining - order.amount as i32;
                 }
                 None => {
-                    println!("drained the whole queue at current price, moving to next price");
+                    debug!("drained the whole queue at current price, moving to next price");
                 }
             }
             if self.book[0].len() == 0 {
                 self.book.remove(0);
             }
             if remaining <= 0 {
-                println!("filled the order");
+                debug!("filled the order");
                 break;
             }
             if self.book.len() == 0 {
-                println!("drained the whole book without filling the order");
+                debug!("drained the whole book without filling the order");
                 // Add all the order back if we fail to fill
                 for &i in orders.iter() {
                     let result = self.add_order(i);
@@ -214,15 +219,35 @@ impl OrderBook {
         return Ok(orders);
     }
 
-    pub fn fill_order(to_fill: OpenLimitOrder) {
-        // TODO: call the helper, return average
-        // fill price.
+    pub fn average_price(&self, orders: Vec<OpenLimitOrder>) -> f64 {
+        let total_shares = orders.iter().fold(0, |sum, order| sum + order.amount);
+        orders.iter().fold(0, |sum, order| sum + order.price*order.amount) as f64 / total_shares as f64
+    }
+
+    pub fn fill_order(&mut self, to_fill: OpenLimitOrder) -> Result<FillResult, &'static str> {
+        let orders_used = self.fill_order_helper(to_fill)?;
+        let extra = orders_used.iter().fold(0, |sum, order| sum + order.amount) - to_fill.amount;
+        if extra > 0 {
+            // If the orders used is > then the desired fill, we had to split an order.
+            // Include the appropriate portion of the split order in the average price calculation.
+            let (orders_used, extra_order)= orders_used.split_at(orders_used.len() - 1);
+            let mut orders_used = orders_used.clone().to_vec();
+            let mut extra_order = extra_order[0].clone();
+            extra_order.amount = extra;
+            orders_used.push(extra_order);
+            return Ok(FillResult {
+                avg_price: self.average_price(orders_used)
+            });
+        }
+        Ok(FillResult {
+            avg_price: self.average_price(orders_used),
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::order_book::{OpenLimitOrder, OrderBook, Side, Symbol};
+    use crate::order_book::{OpenLimitOrder, OrderBook, Side, Symbol, FillResult};
     use crate::VecDeque;
     use uuid::Uuid;
 
@@ -557,4 +582,27 @@ mod tests {
             buy_ob.get_book(),
         )
     }
+
+    #[test]
+    fn test_average_price() {
+        let orders =
+                vec![
+                OpenLimitOrder {
+                id: Uuid::parse_str("00000000-0000-0000-0000-000000000010").unwrap(),
+                amount: 10,
+                symbol: Symbol::AAPL,
+                side: Side::Buy,
+                price: 4,
+                },
+                OpenLimitOrder {
+                id: Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+                amount: 11,
+                symbol: Symbol::AAPL,
+                side: Side::Buy,
+                price: 5,
+                }];
+        let ob = OrderBook::new(Side::Buy);
+        assert_eq!(ob.average_price(orders), 4.523809523809524);
+    }
+
 }
