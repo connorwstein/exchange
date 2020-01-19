@@ -58,32 +58,26 @@ pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFu
                             };
                         let order = book.add_order(order_request);
                         match order {
-                            Ok(order) => {
-                                Box::new(future::ok(
-                                    Response::builder()
-                                        .status(StatusCode::OK)
-                                        .body(Body::from(serde_json::to_string(&order).unwrap()))
-                                        .unwrap(),
-                                ))
-                            },
-                            Err(order) => {
-                                Box::new(future::ok(
-                                    Response::builder()
-                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                        .body(Body::from(serde_json::to_string(&order).unwrap()))
-                                        .unwrap(),
-                                ))
-                            }
+                            Ok(order) => Box::new(future::ok(
+                                Response::builder()
+                                    .status(StatusCode::OK)
+                                    .body(Body::from(serde_json::to_string(&order).unwrap()))
+                                    .unwrap(),
+                            )),
+                            Err(order) => Box::new(future::ok(
+                                Response::builder()
+                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                    .body(Body::from(serde_json::to_string(&order).unwrap()))
+                                    .unwrap(),
+                            )),
                         }
-                    },
-                    Err(order_request) => {
-                        Box::new(future::ok(
-                            Response::builder()
-                                .status(StatusCode::BAD_REQUEST)
-                                .body(Body::empty())
-                                .unwrap(),
-                        ))
-                    },
+                    }
+                    Err(order_request) => Box::new(future::ok(
+                        Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .body(Body::empty())
+                            .unwrap(),
+                    )),
                 }
             }))
         }
@@ -121,14 +115,12 @@ pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFu
                                 buy_ob.write().unwrap()
                             };
                         match book.fill_order(order_request) {
-                            Ok(fr) => {
-                                Box::new(future::ok(
-                                    Response::builder()
-                                        .status(StatusCode::OK)
-                                        .body(Body::from(serde_json::to_string(&fr).unwrap()))
-                                        .unwrap(),
-                                ))
-                            },
+                            Ok(fr) => Box::new(future::ok(
+                                Response::builder()
+                                    .status(StatusCode::OK)
+                                    .body(Body::from(serde_json::to_string(&fr).unwrap()))
+                                    .unwrap(),
+                            )),
                             Err(fr) => {
                                 info!("unable to fill order");
                                 Box::new(future::ok(
@@ -139,17 +131,16 @@ pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFu
                                 ))
                             }
                         }
-                    },
-                    Err(order_request) => {
-                        Box::new(future::ok(
-                            Response::builder()
-                                .status(StatusCode::BAD_REQUEST)
-                                .body(Body::empty())
-                                .unwrap(),
-                        ))
                     }
+                    Err(order_request) => Box::new(future::ok(
+                        Response::builder()
+                            .status(StatusCode::BAD_REQUEST)
+                            .body(Body::empty())
+                            .unwrap(),
+                    )),
                 }
-        }))}
+            }))
+        }
         _ => Box::new(future::ok(
             Response::builder()
                 .status(StatusCode::METHOD_NOT_ALLOWED)

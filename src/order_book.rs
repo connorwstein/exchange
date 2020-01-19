@@ -221,7 +221,10 @@ impl OrderBook {
 
     pub fn average_price(&self, orders: Vec<OpenLimitOrder>) -> f64 {
         let total_shares = orders.iter().fold(0, |sum, order| sum + order.amount);
-        orders.iter().fold(0, |sum, order| sum + order.price*order.amount) as f64 / total_shares as f64
+        orders
+            .iter()
+            .fold(0, |sum, order| sum + order.price * order.amount) as f64
+            / total_shares as f64
     }
 
     pub fn fill_order(&mut self, to_fill: OpenLimitOrder) -> Result<FillResult, &'static str> {
@@ -230,13 +233,13 @@ impl OrderBook {
         if extra > 0 {
             // If the orders used is > then the desired fill, we had to split an order.
             // Include the appropriate portion of the split order in the average price calculation.
-            let (orders_used, extra_order)= orders_used.split_at(orders_used.len() - 1);
+            let (orders_used, extra_order) = orders_used.split_at(orders_used.len() - 1);
             let mut orders_used = orders_used.clone().to_vec();
             let mut extra_order = extra_order[0].clone();
             extra_order.amount = extra;
             orders_used.push(extra_order);
             return Ok(FillResult {
-                avg_price: self.average_price(orders_used)
+                avg_price: self.average_price(orders_used),
             });
         }
         Ok(FillResult {
@@ -247,7 +250,7 @@ impl OrderBook {
 
 #[cfg(test)]
 mod tests {
-    use crate::order_book::{OpenLimitOrder, OrderBook, Side, Symbol, FillResult};
+    use crate::order_book::{FillResult, OpenLimitOrder, OrderBook, Side, Symbol};
     use crate::VecDeque;
     use uuid::Uuid;
 
@@ -585,22 +588,22 @@ mod tests {
 
     #[test]
     fn test_average_price() {
-        let orders =
-                vec![
-                OpenLimitOrder {
+        let orders = vec![
+            OpenLimitOrder {
                 id: Uuid::parse_str("00000000-0000-0000-0000-000000000010").unwrap(),
                 amount: 10,
                 symbol: Symbol::AAPL,
                 side: Side::Buy,
                 price: 4,
-                },
-                OpenLimitOrder {
+            },
+            OpenLimitOrder {
                 id: Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
                 amount: 11,
                 symbol: Symbol::AAPL,
                 side: Side::Buy,
                 price: 5,
-                }];
+            },
+        ];
         let ob = OrderBook::new(Side::Buy);
         assert_eq!(ob.average_price(orders), 4.523809523809524);
     }
