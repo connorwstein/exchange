@@ -10,9 +10,11 @@ pub enum Side {
     Sell,
 }
 
-#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub enum Symbol {
     AAPL,
+    MSFT,
+    AMZN,
 }
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]

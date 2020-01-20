@@ -21,20 +21,62 @@ use std::vec::Vec;
 
 use futures::{future, Stream};
 //use futures::future::Future;
-
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use serde_json::{Error, Result};
+use std::collections::HashMap;
 
 mod order_book;
 
+type OrderBookRef = Arc<RwLock<order_book::OrderBook>>;
 lazy_static! {
-    static ref buy_ob: Arc<RwLock<order_book::OrderBook>> = Arc::new(RwLock::new(
-        order_book::OrderBook::new(order_book::Side::Buy)
-    ));
-    static ref sell_ob: Arc<RwLock<order_book::OrderBook>> = Arc::new(RwLock::new(
-        order_book::OrderBook::new(order_book::Side::Sell)
-    ));
+    static ref BUY: HashMap<order_book::Symbol, OrderBookRef> = {
+        let mut buy = HashMap::new();
+        buy.insert(
+            order_book::Symbol::AAPL,
+            Arc::new(RwLock::new(order_book::OrderBook::new(
+                order_book::Side::Buy,
+            ))),
+        );
+        buy.insert(
+            order_book::Symbol::MSFT,
+            Arc::new(RwLock::new(order_book::OrderBook::new(
+                order_book::Side::Buy,
+            ))),
+        );
+        buy.insert(
+            order_book::Symbol::AMZN,
+            Arc::new(RwLock::new(order_book::OrderBook::new(
+                order_book::Side::Buy,
+            ))),
+        );
+
+        buy
+    };
+    static ref SELL: HashMap<order_book::Symbol, OrderBookRef> = {
+        let mut sell = HashMap::new();
+
+        sell.insert(
+            order_book::Symbol::AAPL,
+            Arc::new(RwLock::new(order_book::OrderBook::new(
+                order_book::Side::Sell,
+            ))),
+        );
+        sell.insert(
+            order_book::Symbol::MSFT,
+            Arc::new(RwLock::new(order_book::OrderBook::new(
+                order_book::Side::Sell,
+            ))),
+        );
+        sell.insert(
+            order_book::Symbol::AMZN,
+            Arc::new(RwLock::new(order_book::OrderBook::new(
+                order_book::Side::Sell,
+            ))),
+        );
+
+        sell
+    };
 }
 
 type GenericError = Box<dyn std::error::Error + Send + Sync>;
@@ -46,15 +88,17 @@ pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFu
             Box::new(req.into_body().concat2().from_err().and_then(|whole_body| {
                 let str_body = String::from_utf8(whole_body.to_vec()).unwrap();
                 info!("order requested {:?}", str_body);
+
                 let order_request: Result<order_book::OpenLimitOrder> =
                     serde_json::from_str(&str_body);
+
                 match order_request {
                     Ok(order_request) => {
                         let mut book: RwLockWriteGuard<order_book::OrderBook> =
                             if order_request.side == order_book::Side::Buy {
-                                buy_ob.write().unwrap()
+                                BUY.get(&order_request.symbol).unwrap().write().unwrap()
                             } else {
-                                sell_ob.write().unwrap()
+                                SELL.get(&order_request.symbol).unwrap().write().unwrap()
                             };
                         let order = book.add_order(order_request);
                         match order {
@@ -82,21 +126,34 @@ pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFu
             }))
         }
         (&Method::GET, "/sells") => {
-            let payload =
-                serde_json::to_string(&sell_ob.read().unwrap().get_book().clone()).unwrap();
+            let payload = String::new();
+            let mut to_serialize: HashMap<
+                order_book::Symbol,
+                Vec<VecDeque<order_book::OpenLimitOrder>>,
+            > = HashMap::new();
+            for (symbol, book) in SELL.iter() {
+                to_serialize.insert(*symbol, book.read().unwrap().get_book());
+            }
             Box::new(future::ok(
                 Response::builder()
                     .status(StatusCode::OK)
-                    .body(Body::from(payload))
+                    .body(Body::from(serde_json::to_string(&to_serialize).unwrap()))
                     .unwrap(),
             ))
         }
         (&Method::GET, "/buys") => {
-            let payload = serde_json::to_string(&buy_ob.read().unwrap().get_book()).unwrap();
+            let payload = String::new();
+            let mut to_serialize: HashMap<
+                order_book::Symbol,
+                Vec<VecDeque<order_book::OpenLimitOrder>>,
+            > = HashMap::new();
+            for (symbol, book) in BUY.iter() {
+                to_serialize.insert(*symbol, book.read().unwrap().get_book());
+            }
             Box::new(future::ok(
                 Response::builder()
                     .status(StatusCode::OK)
-                    .body(Body::from(payload))
+                    .body(Body::from(serde_json::to_string(&to_serialize).unwrap()))
                     .unwrap(),
             ))
         }
@@ -110,9 +167,9 @@ pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFu
                     Ok(order_request) => {
                         let mut book: RwLockWriteGuard<order_book::OrderBook> =
                             if order_request.side == order_book::Side::Buy {
-                                sell_ob.write().unwrap()
+                                BUY.get(&order_request.symbol).unwrap().write().unwrap()
                             } else {
-                                buy_ob.write().unwrap()
+                                SELL.get(&order_request.symbol).unwrap().write().unwrap()
                             };
                         match book.fill_order(order_request) {
                             Ok(fr) => Box::new(future::ok(
