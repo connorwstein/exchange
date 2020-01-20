@@ -12,18 +12,13 @@ use hyper::StatusCode;
 use hyper::{Body, Client, Method, Request, Response};
 
 use std::collections::VecDeque;
-use std::error;
-use std::ptr::null;
-use std::str;
 use std::string::String;
 use std::sync::{Arc, RwLock, RwLockWriteGuard};
 use std::vec::Vec;
 
 use futures::{future, Stream};
-//use futures::future::Future;
-use log::{info, warn};
-use serde::{Deserialize, Serialize};
-use serde_json::{Error, Result};
+use log::{info};
+use serde_json::{Result};
 use std::collections::HashMap;
 
 mod order_book;
@@ -74,7 +69,6 @@ lazy_static! {
                 order_book::Side::Sell,
             ))),
         );
-
         sell
     };
 }

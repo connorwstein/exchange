@@ -19,7 +19,7 @@ results in a vector shift (O(N)).
 
 ### Example
 ```
-RUST_LOG=debug cargo run
+RUST_BACKTRACE=1 RUST_LOG=debug cargo run
 
 
 curl -H "Content-Type: application/json" -d '{"price": 3, "side": "Buy", "amount": 10, "symbol": "AAPL"}' localhost:3000/order | jq
@@ -33,14 +33,18 @@ curl -H "Content-Type: application/json" -d '{"price": 3, "side": "Buy", "amount
 
 curl localhost:3000/buys
 [
-  [
-    {
-      "id": "5c730c40-c36f-4aac-bd50-69d7f4d8d886",
-      "amount": 10,
-      "symbol": "AAPL",
-      "price": 3,
-      "side": "Buy"
-    }
+ "AMZN": [],
+ "MSFT": [],
+ "AAPL": [
+      [
+        {
+          "id": "5c730c40-c36f-4aac-bd50-69d7f4d8d886",
+          "amount": 10,
+          "symbol": "AAPL",
+          "price": 3,
+          "side": "Buy"
+        }
+      ]
   ]
 ]
 
@@ -51,7 +55,9 @@ curl -H "Content-Type: application/json" -d '{"price": 2, "side": "Sell", "amoun
 
 curl localhost:3000/buys
 [
-  [
+ "AMZN": [],
+ "MSFT": [],
+ "AAPL": [
     {
       "id": "5c730c40-c36f-4aac-bd50-69d7f4d8d886",
       "amount": 5,
