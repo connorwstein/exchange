@@ -1,4 +1,4 @@
-use log::{debug};
+use log::debug;
 use serde::{Deserialize, Serialize};
 use std::boxed::Box;
 use std::collections::VecDeque;
@@ -36,6 +36,9 @@ pub struct OrderBook {
     book: Box<Vec<VecDeque<OpenLimitOrder>>>,
     side: Side,
 }
+
+pub const ERR_CANT_FILL_PRICE: &str = "Can't fill order, nothing available for that price";
+pub const ERR_CANT_FILL_SIZE: &str = "Can't fill order, order too large";
 
 impl OrderBook {
     pub fn new(side: Side) -> OrderBook {
@@ -154,13 +157,13 @@ impl OrderBook {
 
         debug!("orderbook size {}", self.book.len());
         if self.book.len() == 0 {
-            return Err("empty book");
+            return Err(ERR_CANT_FILL_SIZE);
         }
 
         // If the current price is no good break
         if !self.valid_price(to_fill.price, self.book[0].front().unwrap().price) {
             debug!("nothing available in book at valid price");
-            return Err("cannot fill order");
+            return Err(ERR_CANT_FILL_PRICE);
         }
 
         let mut remaining: i32 = to_fill.amount as i32;
@@ -195,12 +198,12 @@ impl OrderBook {
                         panic!(result);
                     }
                 }
-                return Err("failed to fill order, drained whole book");
+                return Err(ERR_CANT_FILL_SIZE);
             }
         }
 
         if remaining > 0 {
-            return Err("unable to fill order at specified price");
+            return Err(ERR_CANT_FILL_PRICE);
         }
 
         if remaining == 0 {
@@ -212,7 +215,7 @@ impl OrderBook {
         // Add a new order which is this leftover to the book.
         let last_order = orders[orders.len() - 1];
         self.add_order(OpenLimitOrder {
-            id: Uuid::new_v4(),
+            id: last_order.id,
             price: last_order.price,
             side: last_order.side,
             amount: remaining.abs() as u32,

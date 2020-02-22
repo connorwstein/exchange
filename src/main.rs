@@ -17,8 +17,8 @@ use std::sync::{Arc, RwLock, RwLockWriteGuard};
 use std::vec::Vec;
 
 use futures::{future, Stream};
-use log::{info};
-use serde_json::{Result};
+use log::info;
+use serde_json::Result;
 use std::collections::HashMap;
 
 mod order_book;
@@ -82,32 +82,65 @@ pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFu
             Box::new(req.into_body().concat2().from_err().and_then(|whole_body| {
                 let str_body = String::from_utf8(whole_body.to_vec()).unwrap();
                 info!("order requested {:?}", str_body);
-
                 let order_request: Result<order_book::OpenLimitOrder> =
                     serde_json::from_str(&str_body);
 
                 match order_request {
                     Ok(order_request) => {
-                        let mut book: RwLockWriteGuard<order_book::OrderBook> =
-                            if order_request.side == order_book::Side::Buy {
-                                BUY.get(&order_request.symbol).unwrap().write().unwrap()
-                            } else {
-                                SELL.get(&order_request.symbol).unwrap().write().unwrap()
-                            };
-                        let order = book.add_order(order_request);
-                        match order {
-                            Ok(order) => Box::new(future::ok(
+                        let mut book: RwLockWriteGuard<order_book::OrderBook>;
+                        let mut opposing_book: RwLockWriteGuard<order_book::OrderBook>;
+                        if order_request.side == order_book::Side::Buy {
+                            book = BUY.get(&order_request.symbol).unwrap().write().unwrap();
+                            opposing_book =
+                                SELL.get(&order_request.symbol).unwrap().write().unwrap();
+                        } else {
+                            book = SELL.get(&order_request.symbol).unwrap().write().unwrap();
+                            opposing_book =
+                                BUY.get(&order_request.symbol).unwrap().write().unwrap();
+                        }
+
+                        // If we can instantly match the order, then lets match it.
+                        // If not, just leave it on the order book.
+                        // Probably want to publish the matched order somewhere.
+                        match opposing_book.fill_order(order_request) {
+                            Ok(fr) => Box::new(future::ok(
                                 Response::builder()
                                     .status(StatusCode::OK)
-                                    .body(Body::from(serde_json::to_string(&order).unwrap()))
+                                    .body(Body::from(serde_json::to_string(&fr).unwrap()))
                                     .unwrap(),
                             )),
-                            Err(order) => Box::new(future::ok(
-                                Response::builder()
-                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                    .body(Body::from(serde_json::to_string(&order).unwrap()))
-                                    .unwrap(),
-                            )),
+                            Err(e) => {
+                                info!("unable to fill order, leaving on the book");
+                                match e {
+                                    order_book::ERR_CANT_FILL_PRICE
+                                    | order_book::ERR_CANT_FILL_SIZE => {
+                                        match book.add_order(order_request) {
+                                            Ok(order) => Box::new(future::ok(
+                                                Response::builder()
+                                                    .status(StatusCode::OK)
+                                                    .body(Body::from(
+                                                        serde_json::to_string(&order).unwrap(),
+                                                    ))
+                                                    .unwrap(),
+                                            )),
+                                            Err(order) => Box::new(future::ok(
+                                                Response::builder()
+                                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                                    .body(Body::from(
+                                                        serde_json::to_string(&order).unwrap(),
+                                                    ))
+                                                    .unwrap(),
+                                            )),
+                                        }
+                                    }
+                                    e => Box::new(future::ok(
+                                        Response::builder()
+                                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                            .body(Body::from(serde_json::to_string(e).unwrap()))
+                                            .unwrap(),
+                                    )),
+                                }
+                            }
                         }
                     }
                     Err(order_request) => Box::new(future::ok(
@@ -150,47 +183,6 @@ pub fn router(req: Request<Body>, _client: &Client<HttpConnector>) -> ResponseFu
                     .body(Body::from(serde_json::to_string(&to_serialize).unwrap()))
                     .unwrap(),
             ))
-        }
-        (&Method::POST, "/fill") => {
-            Box::new(req.into_body().concat2().from_err().and_then(|whole_body| {
-                let str_body = String::from_utf8(whole_body.to_vec()).unwrap();
-                info!("fill order {:?}", str_body);
-                let order_request: Result<order_book::OpenLimitOrder> =
-                    serde_json::from_str(&str_body);
-                match order_request {
-                    Ok(order_request) => {
-                        let mut book: RwLockWriteGuard<order_book::OrderBook> =
-                            if order_request.side == order_book::Side::Buy {
-                                BUY.get(&order_request.symbol).unwrap().write().unwrap()
-                            } else {
-                                SELL.get(&order_request.symbol).unwrap().write().unwrap()
-                            };
-                        match book.fill_order(order_request) {
-                            Ok(fr) => Box::new(future::ok(
-                                Response::builder()
-                                    .status(StatusCode::OK)
-                                    .body(Body::from(serde_json::to_string(&fr).unwrap()))
-                                    .unwrap(),
-                            )),
-                            Err(fr) => {
-                                info!("unable to fill order");
-                                Box::new(future::ok(
-                                    Response::builder()
-                                        .status(StatusCode::BAD_REQUEST)
-                                        .body(Body::from(serde_json::to_string(&fr).unwrap()))
-                                        .unwrap(),
-                                ))
-                            }
-                        }
-                    }
-                    Err(order_request) => Box::new(future::ok(
-                        Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .body(Body::empty())
-                            .unwrap(),
-                    )),
-                }
-            }))
         }
         _ => Box::new(future::ok(
             Response::builder()

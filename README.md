@@ -1,4 +1,4 @@
-A first project in Rust - in-memory order book.
+A first project to explore Rust: an in-memory order book.
 
 ### Design
 According to [https://www.chrisstucchio.com/blog/2012/hft_apology.html] an order book needs to be organized by price level first and then by arrival time.
@@ -17,56 +17,75 @@ The best case is just a single queue at a one price level, yielding O(k).
 results in a vector shift (O(N)). 
 
 
-### Example
+### Examples
 ```
 RUST_BACKTRACE=1 RUST_LOG=debug cargo run
 
 
-curl -H "Content-Type: application/json" -d '{"price": 3, "side": "Buy", "amount": 10, "symbol": "AAPL"}' localhost:3000/order | jq
+curl -H "Content-Type: application/json" -d '{"price": 3, "side": "Sell", "amount": 5, "symbol": "AAPL"}' localhost:3000/order | jq
 {
-  "id": "51e562ce-284b-4562-a4bc-527215fa5128",
-  "amount": 10,
+  "id": "ef1c4f22-ff16-4b40-9c92-881b1f1db8ca",
+  "amount": 5,
   "symbol": "AAPL",
   "price": 3,
-  "side": "Buy"
+  "side": "Sell"
 }
 
-curl localhost:3000/buys
-[
- "AMZN": [],
- "MSFT": [],
- "AAPL": [
-      [
-        {
-          "id": "5c730c40-c36f-4aac-bd50-69d7f4d8d886",
-          "amount": 10,
-          "symbol": "AAPL",
-          "price": 3,
-          "side": "Buy"
-        }
-      ]
-  ]
-]
+curl -H "Content-Type: application/json" -d '{"price": 3, "side": "Sell", "amount": 5, "symbol": "AAPL"}' localhost:3000/order | jq
+{
+  "id": "40bc6343-f2cf-486c-9dc6-8111ea3e69ac",
+  "amount": 5,
+  "symbol": "AAPL",
+  "price": 3,
+  "side": "Sell"
+}
 
-curl -H "Content-Type: application/json" -d '{"price": 2, "side": "Sell", "amount": 5, "symbol": "AAPL"}' localhost:3000/fill | jq
+
+curl localhost:3000/sells | jq
+{
+  "AAPL": [
+    [
+      {
+        "id": "ef1c4f22-ff16-4b40-9c92-881b1f1db8ca",
+        "amount": 5,
+        "symbol": "AAPL",
+        "price": 3,
+        "side": "Sell"
+      },
+      {
+        "id": "40bc6343-f2cf-486c-9dc6-8111ea3e69ac",
+        "amount": 5,
+        "symbol": "AAPL",
+        "price": 3,
+        "side": "Sell"
+      }
+    ]
+  ],
+  "MSFT": [],
+  "AMZN": []
+}
+
+curl -H "Content-Type: application/json" -d '{"price": 3, "side": "Buy", "amount": 7, "symbol": "AAPL"}' localhost:3000/order | jq
 {
   "avg_price": 3
 }
 
-curl localhost:3000/buys
-[
- "AMZN": [],
- "MSFT": [],
- "AAPL": [
-    {
-      "id": "5c730c40-c36f-4aac-bd50-69d7f4d8d886",
-      "amount": 5,
-      "symbol": "AAPL",
-      "price": 3,
-      "side": "Buy"
-    }
-  ]
-]
+curl localhost:3000/sells
+{
+  "AMZN": [],
+  "AAPL": [
+    [
+      {
+        "id": "40bc6343-f2cf-486c-9dc6-8111ea3e69ac",
+        "amount": 3,
+        "symbol": "AAPL",
+        "price": 3,
+        "side": "Sell"
+      }
+    ]
+  ],
+  "MSFT": []
+}
 
 ```
 
